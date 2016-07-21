@@ -12,12 +12,14 @@ namespace mshadow {
 inline void PostProcessRPNForward(const Tensor<cpu, 4> &datacls_in,
                            const Tensor<cpu, 4> &datareg_in,
                            const Tensor<cpu, 2> &anchorinfo_in,
-                           const Tensor<cpu, 3> &bb_out,
-                           const float clsthreshold,
-                           const int originalH, const int originalW) {
+                           const Tensor<cpu, 1> &otherinfo_in,
+                           Tensor<cpu, 3> &bb_out) {
   
   CHECK_EQ(datacls_in.size(0), datareg_in.size(0));
   
+  float clsthreshold = otherinfo_in[0];
+  int originalH = otherinfo_in[1];
+  int originalW = otherinfo_in[2];
   int dwBatchNum = datacls_in.size(0);
   int dwAnchorNum = anchorinfo_in.size(0);
   int bb_maxnum_per_batch = bb_out.size(1);

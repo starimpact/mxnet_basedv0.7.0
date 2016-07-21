@@ -66,12 +66,8 @@ class PostProcessRPNOp : public Operator {
     Tensor<xpu, 2> tanchorinfo_in = anchorinfo_in.get<xpu, 2, real_t>(s);
     Tensor<xpu, 1> totherinfo_in = otherinfo_in.get<xpu, 1, real_t>(s);
     Tensor<xpu, 3> tbb_out = bb_out.get<xpu, 3, real_t>(s);
-    
-    int clsthreshold = totherinfo_in[0];
-    int originalH = totherinfo_in[1];
-    int originalW = totherinfo_in[2];
 
-    PostProcessRPNForward(tdatacls_in, tdatareg_in, tanchorinfo_in, tbb_out, clsthreshold, originalH, originalW);
+    PostProcessRPNForward(tdatacls_in, tdatareg_in, tanchorinfo_in, totherinfo_in, tbb_out);
   }
 
   virtual void Backward(const OpContext &ctx,
