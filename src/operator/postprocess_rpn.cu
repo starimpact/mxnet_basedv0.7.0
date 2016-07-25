@@ -12,11 +12,7 @@ namespace mshadow {
 
 namespace cuda {
 
-__global__ void PostProcessRPNForwardKernel1() {
-}
-
-
-__global__ void PostProcessRPNForwardKernel(
+__global__ void PostProcessRPNForwardKernel2(
                 int count,
                 const float *pfCls, const float *pfReg, 
                 const float *pfAnchor, const float *pfOtherinfo, 
@@ -77,7 +73,7 @@ __global__ void PostProcessRPNForwardKernel(
 }
 
 
-inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
+inline void PostProcessRPNForward2(const Tensor<gpu, 4> &datacls_in,
                            const Tensor<gpu, 4> &datareg_in,
                            const Tensor<gpu, 2> &anchorinfo_in,
                            const Tensor<gpu, 1> &otherinfo_in,
@@ -130,17 +126,125 @@ inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
 //    printf("bb_onebatch.dptr_:%x\n", bb_onebatch.dptr_);
 //    printf("bb_maxnum_per_batch:%d\n", bb_maxnum_per_batch); 
 #if 1   
-    PostProcessRPNForwardKernel<<<dimGrid, dimBlock, 0, stream>>>(
+    PostProcessRPNForwardKernel2<<<dimGrid, dimBlock, 0, stream>>>(
             count, 
             datacls_onebatch.dptr_, datareg_onebatch.dptr_, 
-            anchorinfo_in.dptr_, otherinfo_in.dptr_, dwAnchorNum, dwFeatH, dwFeatW, 
-            bb_onebatch.dptr_, bb_maxnum_per_batch, pdwCounter+bi);
+            anchorinfo_in.dptr_, otherinfo_in.dptr_, dwAnchorNum, dwFeatH, dwFeatW, bb_onebatch.dptr_, bb_maxnum_per_batch, pdwCounter+bi);
 //    cudaThreadSynchronize();
 #else
     PostProcessRPNForwardKernel1<<<dimGrid, dimBlock>>>();
 #endif
 //    printf("fucking ending...(%d)\n", bi);
   }
+  cudaFree(pdwCounter);
+}
+
+
+__global__ void PostProcessRPNForwardKernel(
+                int count,
+                const float *pfClsAll, const float *pfRegAll, 
+                const float *pfAnchor, const float *pfOtherinfo, 
+                int dwBatchNum, int dwAnchorNum, int dwFeatH, int dwFeatW, 
+                float *pfBBsAll, int dwMaxBBNum, int *pdwbb_num_all) {
+#if 1     
+  float clsthreshold = pfOtherinfo[0];
+  int originalH = pfOtherinfo[1];
+  int originalW = pfOtherinfo[2]; 
+//  printf("clsthreshold:%.1f, originalH:%d, originalW:%d\n", clsthreshold, originalH, originalW);
+//  __syncthreads();
+  int index = (blockIdx.x + blockIdx.y * gridDim.x) * blockDim.x + threadIdx.x;
+
+  if (1 && index < count)
+  {
+    int dwFeatSize = dwFeatH * dwFeatW;
+    int dwFeatAnchorSize = dwFeatSize * dwAnchorNum;
+    int dwBatchI = index / dwFeatAnchorSize;
+    int dwAnchorI = (index - dwBatchI * dwFeatAnchorSize) / dwFeatSize;
+    int dwRI = (index - dwBatchI * dwFeatAnchorSize - dwFeatSize * dwAnchorI) / dwFeatW;
+    int dwCI = (index - dwBatchI * dwFeatAnchorSize - dwFeatSize * dwAnchorI) % dwFeatW;
+    int dwOft = dwRI * dwFeatW + dwCI;
+    int dwAnchorOft = dwAnchorI * dwFeatSize;
+    const float *pfNowAnchor = pfAnchor + dwAnchorI * 2;
+    const float *pfReg = pfRegAll + dwFeatAnchorSize * 4 * dwBatchI;
+    const float *pfCls = pfClsAll + dwFeatAnchorSize * dwBatchI;
+    float *pfBBs = pfBBsAll + dwBatchI * dwMaxBBNum * 4;
+    int *pdwbb_num_now = pdwbb_num_all + dwBatchI;
+
+    int nownum = *pdwbb_num_now;
+//    printf("bidxx:%d-bidxy:%d-gdimx:%d-bdimx:%d-tidxx:%d, index:%d, nownum:%d\n", blockIdx.x, blockIdx.y, gridDim.x, blockDim.x, threadIdx.x, index, nownum);
+//    printf("bidxx:%d-bidxy:%d-gdimx:%d-bdimx:%d-tidxx:%d, index:%d\n", blockIdx.x, blockIdx.y, gridDim.x, blockDim.x, threadIdx.x, index);
+//    __syncthreads();
+#if 1
+    if (nownum >= 0 && nownum < dwMaxBBNum)
+    {
+      if (pfCls[dwOft + dwAnchorOft] > clsthreshold)
+      {
+        float fCY = pfReg[dwAnchorOft * 4 + 0 * dwFeatSize + dwOft];
+        float fCX = pfReg[dwAnchorOft * 4 + 1 * dwFeatSize + dwOft];
+        float fH = pfReg[dwAnchorOft * 4 + 2 * dwFeatSize + dwOft];
+        float fW = pfReg[dwAnchorOft * 4 + 3 * dwFeatSize + dwOft];
+        fCY = fCY * pfNowAnchor[0] + ((float)(dwRI) * originalH) / dwFeatH;
+        fCX = fCX * pfNowAnchor[1] + ((float)(dwCI) * originalW) / dwFeatW;
+        fH = expf(fH) * pfNowAnchor[0];
+        fW = expf(fW) * pfNowAnchor[1];
+        atomicInc((unsigned int*)(pdwbb_num_now), dwMaxBBNum);
+        nownum = *pdwbb_num_now;
+       
+        if (nownum > 0)
+        {
+          pfBBs[(nownum-1) * 4 + 0] = fCY;
+          pfBBs[(nownum-1) * 4 + 1] = fCX;
+          pfBBs[(nownum-1) * 4 + 2] = fH;
+          pfBBs[(nownum-1) * 4 + 3] = fW;
+
+//          printf("bidxx:%d-bidxy:%d-gdimx:%d-bdimx:%d-tidxx:%d, index:%d, nownum:%d\n", blockIdx.x, blockIdx.y, gridDim.x, blockDim.x, threadIdx.x, index, nownum);
+//          __syncthreads();
+        }
+      }
+    }
+#endif
+  }
+#endif
+}
+
+
+inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
+                           const Tensor<gpu, 4> &datareg_in,
+                           const Tensor<gpu, 2> &anchorinfo_in,
+                           const Tensor<gpu, 1> &otherinfo_in,
+                           Tensor<gpu, 3> &bb_out) {
+  CHECK_EQ(datacls_in.size(0), datareg_in.size(0));
+
+  int dwBatchNum = datacls_in.size(0);
+  int dwAnchorNum = anchorinfo_in.size(0);
+  int bb_maxnum_per_batch = bb_out.size(1);
+  
+  int dwFeatH = datacls_in.size(2);
+  int dwFeatW = datacls_in.size(3);
+  int dwBBMemLen = bb_out.MSize();
+  cudaMemset(bb_out.dptr_, 0, dwBBMemLen*sizeof(float));
+  int *pdwCounter = 0;
+  cudaMalloc(&pdwCounter, dwBatchNum*sizeof(int));
+  cudaMemset(pdwCounter, 0, dwBatchNum*sizeof(int));
+  
+  int count = dwFeatH * dwFeatW * dwAnchorNum * dwBatchNum;
+#if 1
+  const int gridSize = (count + kMaxThreadsPerBlock - 1) / kMaxThreadsPerBlock;
+  dim3 dimGrid(kMaxGridNum, (gridSize + kMaxGridNum - 1) / kMaxGridNum);
+  dim3 dimBlock(kMaxThreadsPerBlock);
+#else
+  dim3 dimGrid(2, 2);
+  dim3 dimBlock(2);
+#endif
+  CheckLaunchParam(dimGrid, dimBlock, "PostProcessRPN Forward");
+  cudaStream_t stream = Stream<gpu>::GetStream(bb_out.stream_);
+  
+  PostProcessRPNForwardKernel<<<dimGrid, dimBlock, 0, stream>>>(
+            count, 
+            datacls_in.dptr_, datareg_in.dptr_, 
+            anchorinfo_in.dptr_, otherinfo_in.dptr_, dwBatchNum, dwAnchorNum, dwFeatH, dwFeatW, 
+            bb_out.dptr_, bb_maxnum_per_batch, pdwCounter);
+
   cudaFree(pdwCounter);
 }
   
@@ -153,6 +257,7 @@ inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
                            Tensor<gpu, 3> &bb_out) {
 //  printf("originalW:%d\n", originalW);                           
   cuda::PostProcessRPNForward(datacls_in, datareg_in, anchorinfo_in, otherinfo_in, bb_out);
+//  cuda::PostProcessRPNForward2(datacls_in, datareg_in, anchorinfo_in, otherinfo_in, bb_out);
 }
 
 } // namespace mshadow
