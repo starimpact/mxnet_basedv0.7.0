@@ -67,6 +67,12 @@ class PostProcessRPNOp : public Operator {
     Tensor<xpu, 1> totherinfo_in = otherinfo_in.get<xpu, 1, real_t>(s);
     Tensor<xpu, 3> tbb_out = bb_out.get<xpu, 3, real_t>(s);
 
+    CHECK_EQ(tdatacls_in.CheckContiguous(), true);
+    CHECK_EQ(tdatareg_in.CheckContiguous(), true);
+    CHECK_EQ(tanchorinfo_in.CheckContiguous(), true);
+    CHECK_EQ(totherinfo_in.CheckContiguous(), true);
+    CHECK_EQ(tbb_out.CheckContiguous(), true);
+
     PostProcessRPNForward(tdatacls_in, tdatareg_in, tanchorinfo_in, totherinfo_in, tbb_out);
   }
 
