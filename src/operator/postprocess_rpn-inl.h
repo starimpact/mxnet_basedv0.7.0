@@ -125,7 +125,7 @@ class PostProcessRPNProp : public OperatorProperty {
     anchorinfoshape = Shape2(clsshape[1], 2);
     otherinfoshape = Shape1(3);
 
-    TShape outbbshape = Shape3(clsshape[0], param_.maxoutbbnum, 4); //batch, bbnum, [cx, cy, w, h]
+    TShape outbbshape = Shape3(clsshape[0], param_.maxoutbbnum, 5); //batch, bbnum, [score, cx, cy, w, h]
 
     out_shape->clear();
     out_shape->push_back(outbbshape);

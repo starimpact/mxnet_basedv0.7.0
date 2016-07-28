@@ -167,17 +167,18 @@ __global__ void PostProcessRPNForwardKernel(
     const float *pfNowAnchor = pfAnchor + dwAnchorI * 2;
     const float *pfReg = pfRegAll + dwFeatAnchorSize * 4 * dwBatchI;
     const float *pfCls = pfClsAll + dwFeatAnchorSize * dwBatchI;
-    float *pfBBs = pfBBsAll + dwBatchI * dwMaxBBNum * 4;
+    float *pfBBs = pfBBsAll + dwBatchI * dwMaxBBNum * 5;
     int *pdwbb_num_now = pdwbb_num_all + dwBatchI;
 
-    int nownum = *pdwbb_num_now;
 //    printf("bidxx:%d-bidxy:%d-gdimx:%d-bdimx:%d-tidxx:%d, index:%d, nownum:%d\n", blockIdx.x, blockIdx.y, gridDim.x, blockDim.x, threadIdx.x, index, nownum);
 //    printf("bidxx:%d-bidxy:%d-gdimx:%d-bdimx:%d-tidxx:%d, index:%d\n", blockIdx.x, blockIdx.y, gridDim.x, blockDim.x, threadIdx.x, index);
 //    __syncthreads();
 #if 1
-    if (nownum >= 0 && nownum < dwMaxBBNum)
+    float fScore = pfCls[dwOft + dwAnchorOft];
+    if (fScore > clsthreshold)
     {
-      if (pfCls[dwOft + dwAnchorOft] > clsthreshold)
+      int nownum = atomicInc((unsigned int*)(pdwbb_num_now), dwMaxBBNum);
+      if (nownum > 0)
       {
         float fCY = pfReg[dwAnchorOft * 4 + 0 * dwFeatSize + dwOft];
         float fCX = pfReg[dwAnchorOft * 4 + 1 * dwFeatSize + dwOft];
@@ -187,16 +188,21 @@ __global__ void PostProcessRPNForwardKernel(
         fCX = fCX * pfNowAnchor[1] + ((float)(dwCI) * originalW) / dwFeatW;
         fH = expf(fH) * pfNowAnchor[0];
         fW = expf(fW) * pfNowAnchor[1];
-        atomicInc((unsigned int*)(pdwbb_num_now), dwMaxBBNum);
-        nownum = *pdwbb_num_now;
        
-        if (nownum > 0)
         {
-          pfBBs[(nownum-1) * 4 + 0] = fCY;
-          pfBBs[(nownum-1) * 4 + 1] = fCX;
-          pfBBs[(nownum-1) * 4 + 2] = fH;
-          pfBBs[(nownum-1) * 4 + 3] = fW;
-
+#if 1
+          pfBBs[(nownum-1) * 5 + 0] = fScore;
+          pfBBs[(nownum-1) * 5 + 1] = fCY;
+          pfBBs[(nownum-1) * 5 + 2] = fCX;
+          pfBBs[(nownum-1) * 5 + 3] = fH;
+          pfBBs[(nownum-1) * 5 + 4] = fW;
+#endif
+#if 0
+          pfBBs[0] = fCY;
+          pfBBs[1] = fCX;
+          pfBBs[2] = fH;
+          pfBBs[3] = fW;
+#endif
 //          printf("bidxx:%d-bidxy:%d-gdimx:%d-bdimx:%d-tidxx:%d, index:%d, nownum:%d\n", blockIdx.x, blockIdx.y, gridDim.x, blockDim.x, threadIdx.x, index, nownum);
 //          __syncthreads();
         }
@@ -225,7 +231,12 @@ inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
   cudaMemset(bb_out.dptr_, 0, dwBBMemLen*sizeof(float));
   int *pdwCounter = 0;
   cudaMalloc(&pdwCounter, dwBatchNum*sizeof(int));
-  cudaMemset(pdwCounter, 0, dwBatchNum*sizeof(int));
+  int *pdwCounterHost = (int*)malloc(sizeof(int)*dwBatchNum);
+  for (int dwI = 0; dwI < dwBatchNum; dwI++)
+  {
+    pdwCounterHost[dwI] = 1;
+  }
+  cudaMemcpy(pdwCounter, pdwCounterHost, dwBatchNum*sizeof(int), cudaMemcpyHostToDevice);
   
   int count = dwFeatH * dwFeatW * dwAnchorNum * dwBatchNum;
 #if 1
@@ -245,6 +256,30 @@ inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
             anchorinfo_in.dptr_, otherinfo_in.dptr_, dwBatchNum, dwAnchorNum, dwFeatH, dwFeatW, 
             bb_out.dptr_, bb_maxnum_per_batch, pdwCounter);
 
+#if 0
+  {
+    cudaMemcpy(pdwCounterHost, pdwCounter, dwBatchNum*sizeof(int), cudaMemcpyDeviceToHost);
+    printf("mxnet=>dwCounter:");
+    for (int i = 0; i < dwBatchNum; i++)
+    {
+      printf("%d:%d, ", i, pdwCounterHost[i]);
+    }
+    printf("\n");
+    printf("mxnet=>bb_maxnum_per_batch:%d\n", bb_maxnum_per_batch);
+    float *pfBBsAll = (float*)malloc(dwBBMemLen*sizeof(float));
+    cudaMemcpy(pfBBsAll, bb_out.dptr_, dwBBMemLen*sizeof(float), cudaMemcpyDeviceToHost);
+    for (int i = 0; i < dwBatchNum; i++)
+    {
+      float *pfNow = pfBBsAll + i * bb_maxnum_per_batch * 4;
+      if (pdwCounterHost[i] > 0 || 1)
+      {
+        printf("mxnet==>%d, 0:%.2f, %.2f, %.2f, %.2f\n", i, pfNow[0], pfNow[1], pfNow[2], pfNow[3]);
+      }
+    }
+    free(pfBBsAll);
+  }
+#endif
+  free(pdwCounterHost);
   cudaFree(pdwCounter);
 }
   
