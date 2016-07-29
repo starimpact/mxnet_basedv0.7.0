@@ -178,7 +178,7 @@ __global__ void PostProcessRPNForwardKernel(
     if (fScore > clsthreshold)
     {
       int nownum = atomicInc((unsigned int*)(pdwbb_num_now), dwMaxBBNum);
-      if (nownum > 0)
+      if (nownum < dwMaxBBNum)
       {
         float fCY = pfReg[dwAnchorOft * 4 + 0 * dwFeatSize + dwOft];
         float fCX = pfReg[dwAnchorOft * 4 + 1 * dwFeatSize + dwOft];
@@ -190,12 +190,19 @@ __global__ void PostProcessRPNForwardKernel(
         fW = expf(fW) * pfNowAnchor[1];
        
         {
-#if 1
+#if 0
           pfBBs[(nownum-1) * 5 + 0] = fScore;
           pfBBs[(nownum-1) * 5 + 1] = fCY;
           pfBBs[(nownum-1) * 5 + 2] = fCX;
           pfBBs[(nownum-1) * 5 + 3] = fH;
           pfBBs[(nownum-1) * 5 + 4] = fW;
+#else
+          pfBBs[nownum * 5 + 0] = fScore;
+          pfBBs[nownum * 5 + 1] = fCY;
+          pfBBs[nownum * 5 + 2] = fCX;
+          pfBBs[nownum * 5 + 3] = fH;
+          pfBBs[nownum * 5 + 4] = fW;
+
 #endif
 #if 0
           pfBBs[0] = fCY;
@@ -231,12 +238,13 @@ inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
   cudaMemset(bb_out.dptr_, 0, dwBBMemLen*sizeof(float));
   int *pdwCounter = 0;
   cudaMalloc(&pdwCounter, dwBatchNum*sizeof(int));
-  int *pdwCounterHost = (int*)malloc(sizeof(int)*dwBatchNum);
-  for (int dwI = 0; dwI < dwBatchNum; dwI++)
-  {
-    pdwCounterHost[dwI] = 1;
-  }
-  cudaMemcpy(pdwCounter, pdwCounterHost, dwBatchNum*sizeof(int), cudaMemcpyHostToDevice);
+  cudaMemset(pdwCounter, 0, dwBatchNum*sizeof(int));
+//  int *pdwCounterHost = (int*)malloc(sizeof(int)*dwBatchNum);
+//  for (int dwI = 0; dwI < dwBatchNum; dwI++)
+//  {
+//    pdwCounterHost[dwI] = 1;
+//  }
+//  cudaMemcpy(pdwCounter, pdwCounterHost, dwBatchNum*sizeof(int), cudaMemcpyHostToDevice);
   
   int count = dwFeatH * dwFeatW * dwAnchorNum * dwBatchNum;
 #if 1
@@ -279,7 +287,7 @@ inline void PostProcessRPNForward(const Tensor<gpu, 4> &datacls_in,
     free(pfBBsAll);
   }
 #endif
-  free(pdwCounterHost);
+//  free(pdwCounterHost);
   cudaFree(pdwCounter);
 }
   
